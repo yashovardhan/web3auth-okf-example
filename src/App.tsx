@@ -1,190 +1,323 @@
-import {useEffect, useState} from 'react'
-import {Web3AuthCore} from '@web3auth/core'
+import { useEffect, useState } from "react";
+import { Web3AuthCore } from "@web3auth/core";
 import {
   WALLET_ADAPTERS,
   CHAIN_NAMESPACES,
   SafeEventEmitterProvider,
-} from '@web3auth/base'
-import {OpenloginAdapter} from '@web3auth/openlogin-adapter'
-import './App.css'
-// import RPC from './ethersRPC' // for using ethers.js
-import RPC from './web3RPC' // for using web3.js
+} from "@web3auth/base";
+import { OpenloginAdapter } from "@web3auth/openlogin-adapter";
+import "./App.css";
+// import RPC from "./evm.web3";
+import RPC from "./evm.ethers";
+import { initializeApp } from "firebase/app";
+import {
+  GoogleAuthProvider,
+  getAuth,
+  signInWithPopup,
+  UserCredential,
+} from "firebase/auth";
+import Torus from "@toruslabs/torus.js";
+import NodeDetailManager from "@toruslabs/fetch-node-details";
+import { EthereumPrivateKeyProvider } from "@web3auth/ethereum-provider";
+
+const TORUS_NETWORK = {
+  TESTNET: "testnet",
+  MAINNET: "mainnet",
+  CYAN: "cyan",
+} 
+
+export const CONTRACT_MAP = {
+  [TORUS_NETWORK.MAINNET]: NodeDetailManager.PROXY_ADDRESS_MAINNET,
+  [TORUS_NETWORK.TESTNET]: NodeDetailManager.PROXY_ADDRESS_ROPSTEN,
+  [TORUS_NETWORK.CYAN]: NodeDetailManager.PROXY_ADDRESS_POLYGON,
+};
+
+export const NETWORK_MAP = {
+  [TORUS_NETWORK.MAINNET]: "https://rpc.ankr.com/eth",
+  [TORUS_NETWORK.TESTNET]: "https://rpc.ankr.com/eth_ropsten",
+  [TORUS_NETWORK.CYAN]: "https://rpc.ankr.com/polygon",
+};
+
+const network = NETWORK_MAP[TORUS_NETWORK.TESTNET];
+const verifier = "web3auth-core-firebase";
 
 const clientId =
-  'BBWLCT1dIp57_-rJQwfMTTWqZgncOKu56b1TSqyLptpwSKrEndkCerKzgJ7aZ87_jviI5oLUJVCt-_mTqBJUSyQ' // get from https://dashboard.web3auth.io
+  "BKjpD5DNAFDbX9Ty9RSBAXdQP8YDY1rldKqKCgbxxa8JZODZ8zxVRzlT74qRIHsor5aIwZ55dQVlcmrwJu37PI8"; // get from https://dashboard.web3auth.io
+
+const chainConfig = {
+  chainId: "0x3",
+  rpcTarget: "https://rpc.ankr.com/eth_ropsten",
+  displayName: "Ropsten Testnet",
+  blockExplorer: "https://ropsten.etherscan.io/",
+  ticker: "ETH",
+  tickerName: "Ethereum",
+};
+
+// Your web app's Firebase configuration
+const firebaseConfig = {
+  apiKey: "AIzaSyB0nd9YsPLu-tpdCrsXn8wgsWVAiYEpQ_E",
+  authDomain: "web3auth-oauth-logins.firebaseapp.com",
+  projectId: "web3auth-oauth-logins",
+  storageBucket: "web3auth-oauth-logins.appspot.com",
+  messagingSenderId: "461819774167",
+  appId: "1:461819774167:web:e74addfb6cc88f3b5b9c92",
+};
 
 function App() {
-  const [web3auth, setWeb3auth] = useState<Web3AuthCore | null>(null)
-  const [provider, setProvider] = useState<SafeEventEmitterProvider | null>(null)
+  const [web3auth, setWeb3auth] = useState<Web3AuthCore | null>(null);
+  const [usesTorus, setUsesTorus] = useState(false);
+  const [torus, setTorus] = useState<Torus | any>(null);
+  const [nodeDetailManager, setNodeDetailManager] = useState<NodeDetailManager | any>(null);
+  const [provider, setProvider] = useState<SafeEventEmitterProvider | null>(
+    null
+  );
 
   useEffect(() => {
     const init = async () => {
       try {
+        // Initialising Web3Auth
         const web3auth = new Web3AuthCore({
           clientId,
           chainConfig: {
             chainNamespace: CHAIN_NAMESPACES.EIP155,
-            chainId: '0x3',
+            ...chainConfig,
           },
-        })
+        });
 
         const openloginAdapter = new OpenloginAdapter({
           adapterSettings: {
-            network: 'testnet',
-            uxMode: 'popup',
+            network: "testnet",
+            uxMode: "redirect",
             loginConfig: {
               jwt: {
-                name: 'Web3Auth-Auth0-JWT',
-                verifier: 'web3auth-auth0-alam',
-                typeOfLogin: 'jwt',
-                clientId: '294QRkchfq2YaXUbPri7D6PH7xzHgQMT',
+                name: "Web3Auth One Key Login Flow",
+                verifier,
+                typeOfLogin: "jwt",
+                clientId,
               },
             },
           },
-        })
-        web3auth.configureAdapter(openloginAdapter)
-        setWeb3auth(web3auth)
+        });
+        web3auth.configureAdapter(openloginAdapter);
+        setWeb3auth(web3auth);
+        await web3auth.init();
 
-        await web3auth.init()
+        // Instantiating Torus for One Key Flow
+        const torus = new Torus({
+          enableOneKey: true,
+          network,
+        });
+        setTorus(torus);
+
+        const nodeDetailManager = new NodeDetailManager({ network, proxyAddress: CONTRACT_MAP[TORUS_NETWORK.TESTNET] });
+        setNodeDetailManager(nodeDetailManager);
+
         if (web3auth.provider) {
           setProvider(web3auth.provider);
         }
       } catch (error) {
-        console.error(error)
+        console.error(error);
       }
-    }
+    };
 
-    init()
-  }, [])
+    init();
+  }, []);
+
+  const signInWithGoogle = async (): Promise<UserCredential> => {
+    try {
+      const app = initializeApp(firebaseConfig);
+      const auth = getAuth(app);
+      const googleProvider = new GoogleAuthProvider();
+      const res = await signInWithPopup(auth, googleProvider);
+      console.log(res);
+      return res;
+    } catch (err) {
+      console.error(err);
+      throw err;
+    }
+  };
 
   const login = async () => {
     if (!web3auth) {
-      console.log("web3auth not initialized yet");
+      uiConsole("web3auth not initialized yet");
       return;
     }
-    const web3authProvider = await web3auth.connectTo(
-      WALLET_ADAPTERS.OPENLOGIN,
-      {
-        relogin: true,
-        loginProvider: 'jwt',
-        extraLoginOptions: {
-          domain: 'https://shahbaz-torus.us.auth0.com',
-          verifierIdField: 'sub',
+    // login with firebase
+    const loginRes = await signInWithGoogle();
+    // get the id token from firebase
+    const idToken = await loginRes.user.getIdToken(true);
+
+    // parse the id token to get the sub value - this will be verifier id (used to know the user)
+    const base64Url = idToken.split('.')[1]
+    const base64 = base64Url?.replace('-', '+').replace('_', '/')
+    const { sub } = JSON.parse(window.atob(base64 || ''))
+
+    // get details of the node shares on the torus network
+    const { torusNodeEndpoints, torusNodePub, torusIndexes } = await nodeDetailManager.getNodeDetails({ verifier, verifierId: sub });
+    const userDetails = await torus.getUserTypeAndAddress(torusNodeEndpoints, torusNodePub,  { verifier, verifierId: sub }, true);
+
+    // check if the user hasn't enabled one key login
+    if (userDetails.typeOfUser === "v2" && userDetails.nonce && userDetails.nonce !== "0") {
+      // if YES, login directly with the torus libraries within your app
+      const keyDetails =  await torus.retrieveShares(torusNodeEndpoints, torusIndexes, verifier, { verifier_id: sub }, idToken, {});
+      // use the private key to get the provider
+      const ethereumPrivateKeyProvider = new EthereumPrivateKeyProvider({
+        config: {
+          chainConfig,
         },
-      },
-    )
-    setProvider(web3authProvider)
+      });
+      await ethereumPrivateKeyProvider.setupProvider(keyDetails.privKey);
+      setProvider(ethereumPrivateKeyProvider.provider);
+      setUsesTorus(true);
+    } else {
+      // if NO, login with web3auth
+      const web3authProvider = await web3auth.connectTo(
+        WALLET_ADAPTERS.OPENLOGIN,
+        {
+          loginProvider: "jwt",
+          extraLoginOptions: {
+            id_token: idToken,
+            verifierIdField: "sub",
+            domain: "http://localhost:3000",
+          },
+        }
+      );
+      setProvider(web3authProvider);
+      setUsesTorus(false);
+    }
   };
 
   const getUserInfo = async () => {
     if (!web3auth) {
-      console.log("web3auth not initialized yet");
+      uiConsole("web3auth not initialized yet");
       return;
     }
+    if (usesTorus) {
+      uiConsole("You are directly using Torus Libraries to login the user, hence this function won't work for you. Get the user details directly from id token")
+    }
     const user = await web3auth.getUserInfo();
-    console.log(user);
+    uiConsole(user);
+  };
+
+  const authenticateUser = async () => {
+    if (!web3auth) {
+      uiConsole("web3auth not initialized yet");
+      return;
+    }
+    if (usesTorus) {
+      uiConsole("You are directly using Torus Libraries to login the user, hence this function won't work for you. For server side verification, directly use your login provider and id token.")
+    }
+    const idToken = await web3auth.authenticateUser();
+    // console.log(JSON.stringify(user, null, 2))
+    uiConsole("Id Token:", idToken, "You can use this id token from Web3Auth for server side verification from your own end, visit the web3auth documentation for more information.");
   };
 
   const logout = async () => {
     if (!web3auth) {
-      console.log("web3auth not initialized yet");
+      uiConsole("web3auth not initialized yet");
       return;
+    }
+    if (usesTorus) {
+      uiConsole("You are directly using Torus Libraries to login the user, hence this function won't work for you. You can logout the user directly from your login provider, or just clear the provider object.")
     }
     await web3auth.logout();
     setProvider(null);
   };
 
-  const getChainId = async () => {
-    if (!provider) {
-      console.log("provider not initialized yet");
-      return;
-    }
-    const rpc = new RPC(provider);
-    const chainId = await rpc.getChainId();
-    console.log(chainId);
-  };
   const getAccounts = async () => {
     if (!provider) {
-      console.log("provider not initialized yet");
+      uiConsole("provider not initialized yet");
       return;
     }
     const rpc = new RPC(provider);
-    const address = await rpc.getAccounts();
-    console.log(address);
+    const userAccount = await rpc.getAccounts();
+    uiConsole(userAccount);
   };
 
   const getBalance = async () => {
     if (!provider) {
-      console.log("provider not initialized yet");
+      uiConsole("provider not initialized yet");
       return;
     }
     const rpc = new RPC(provider);
     const balance = await rpc.getBalance();
-    console.log(balance);
-  };
-
-  const sendTransaction = async () => {
-    if (!provider) {
-      console.log("provider not initialized yet");
-      return;
-    }
-    const rpc = new RPC(provider);
-    const receipt = await rpc.sendTransaction();
-    console.log(receipt);
+    uiConsole(balance);
   };
 
   const signMessage = async () => {
     if (!provider) {
-      console.log("provider not initialized yet");
+      uiConsole("provider not initialized yet");
       return;
     }
     const rpc = new RPC(provider);
-    const signedMessage = await rpc.signMessage();
-    console.log(signedMessage);
+    const result = await rpc.signMessage();
+    uiConsole(result);
   };
 
-  const getPrivateKey = async () => {
+  const sendTransaction = async () => {
     if (!provider) {
-      console.log("provider not initialized yet");
+      uiConsole("provider not initialized yet");
       return;
     }
     const rpc = new RPC(provider);
-    const privateKey = await rpc.getPrivateKey();
-    console.log(privateKey);
+    const result = await rpc.signAndSendTransaction();
+    uiConsole(result);
   };
-  const loggedInView = (
-    <div>
-      <button onClick={getUserInfo} className="card">
-        Get User Info
-      </button>
-      <button onClick={getChainId} className="card">
-        Get Chain ID
-      </button>
-      <button onClick={getAccounts} className="card">
-        Get Accounts
-      </button>
-      <button onClick={getBalance} className="card">
-        Get Balance
-      </button>
-      <button onClick={sendTransaction} className="card">
-        Send Transaction
-      </button>
-      <button onClick={signMessage} className="card">
-        Sign Message
-      </button>
-      <button onClick={getPrivateKey} className="card">
-        Get Private Key
-      </button>
-      <button onClick={logout} className="card">
-        Log Out
-      </button>
+
+  function uiConsole(...args: any[]): void {
+    const el = document.querySelector("#console>p");
+    if (el) {
+      el.innerHTML = JSON.stringify(args || {}, null, 2);
+    }
+  }
+
+  const loginView = (
+    <>
+      <div className="flex-container">
+        <div>
+          <button onClick={getUserInfo} className="card">
+            Get User Info
+          </button>
+        </div>
+        <div>
+          <button onClick={getAccounts} className="card">
+            Get Accounts
+          </button>
+        </div>
+        <div>
+          <button onClick={authenticateUser} className="card">
+            Server Side Verification
+          </button>
+        </div>
+        <div>
+          <button onClick={getBalance} className="card">
+            Get Balance
+          </button>
+        </div>
+        <div>
+          <button onClick={signMessage} className="card">
+            Sign Message
+          </button>
+        </div>
+        <div>
+          <button onClick={sendTransaction} className="card">
+            Send Transaction
+          </button>
+        </div>
+        <div>
+          <button onClick={logout} className="card">
+            Log Out
+          </button>
+        </div>
+      </div>
+
       <div id="console" style={{ whiteSpace: "pre-line" }}>
         <p style={{ whiteSpace: "pre-line" }}></p>
       </div>
-    </div>
+    </>
   );
 
-  const unloggedInView = (
+  const logoutView = (
     <button onClick={login} className="card">
       Login
     </button>
@@ -195,23 +328,30 @@ function App() {
       <h1 className="title">
         <a target="_blank" href="http://web3auth.io/" rel="noreferrer">
           Web3Auth
-        </a>{' '}
-        & ReactJS Example using Auth0
+        </a>{" "}
+        One Key Login Flow (without Openlogin Redirect)
       </h1>
 
-      <div className="grid">{provider ? loggedInView : unloggedInView}</div>
+      <div className="grid">{provider ? loginView : logoutView}</div>
 
       <footer className="footer">
         <a
-          href="https://github.com/Web3Auth/examples/tree/master/auth0-react-example"
+          href="https://github.com/Web3Auth/examples/tree/master/one-key-flow-core-react-example"
           target="_blank"
           rel="noopener noreferrer"
         >
           Source code
         </a>
+        <a
+          href="https://faucet.egorfine.com/"
+          target="_blank"
+          rel="noopener noreferrer"
+        >
+          Ropsten Faucet
+        </a>
       </footer>
     </div>
-  )
+  );
 }
 
-export default App
+export default App;
